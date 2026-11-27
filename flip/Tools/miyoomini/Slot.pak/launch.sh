@@ -95,6 +95,26 @@ printf 'slot: pak %s\n' "$(cat "$DIR/slot.version" 2>/dev/null || echo unknown)"
 	done
 } >> "$LOG" 2>&1
 
+# Which sound route to use when Config/audio does not say. Under MinUI (and on
+# a stock card that has the console's audio server) /dev/dsp is answered by a
+# preloaded libpadsp that hands it to the server: that is the route that works
+# there (exp-v0.4.10). On a card with only Slot on it the server is not running,
+# the preload points at a file that is not there, and raw /dev/dsp took a
+# quarter to a half of the sound, which also slowed the game to that speed (a
+# tester's exp-v0.5.0 logs). The vendor interface (MI_AO) is free then, and on
+# the same console it held 60 fps with sound. So with no server running, take
+# the vendor route unless Config/audio chose another.
+if [ -z "${SLOT_AUDIO:-}" ] && ! pidof audioserver audioserver.mod >/dev/null 2>&1; then
+	export SLOT_AUDIO=vendor
+	printf 'slot: audio: no audio server running, using the vendor interface\n' >> "$LOG"
+fi
+# A preload that names a missing file only fills the log with ld.so errors.
+if [ -n "${LD_PRELOAD:-}" ]; then
+	for p in $(echo "$LD_PRELOAD" | tr ':' ' '); do
+		[ -e "$p" ] || { unset LD_PRELOAD; break; }
+	done
+fi
+
 # MinUI drops the CPU to its 504 MHz menu speed when it starts and nothing puts
 # it back before a Tool runs, so without this the shelf, the software renderer
 # and the emulator all run at under half the clock MinUI gives its own games.
@@ -115,7 +135,19 @@ if [ -n "$OVERCLOCK" ]; then
 	printf 'slot: cpu: asking for %s kHz\n' "$KHZ" >> "$LOG"
 	"$OVERCLOCK" "$KHZ" >> "$LOG" 2>&1
 else
-	printf 'slot: cpu: no overclock.elf, the clock is left as it was\n' >> "$LOG"
+	# No MinUI helper (the stock firmware, or a card with only Slot on it). The
+	# firmware leaves the CPU on "ondemand", which sat at 600 to 800 MHz under
+	# Slot on a tester's console and made games sluggish. The kernel's own
+	# "performance" governor holds the top stock speed (1200 MHz) with no
+	# register writes; the old governor is put back when Slot exits.
+	GOV_NODE=/sys/devices/system/cpu/cpufreq/policy0/scaling_governor
+	OLD_GOV="$(cat "$GOV_NODE" 2>/dev/null)"
+	if echo performance > "$GOV_NODE" 2>/dev/null; then
+		printf 'slot: cpu: no overclock.elf, governor %s -> performance\n' "${OLD_GOV:-unknown}" >> "$LOG"
+	else
+		OLD_GOV=""
+		printf 'slot: cpu: no overclock.elf and the governor could not be set, the clock is left as it was\n' >> "$LOG"
+	fi
 fi
 printf 'slot: launcher: cpu now %s kHz\n' "$(cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq 2>/dev/null || echo unreadable)" >> "$LOG"
 
@@ -132,4 +164,5 @@ export MALLOC_TRIM_THRESHOLD_=65536
 
 ./slot --init-root "$SLOT_ROOT" >> "$LOG" 2>&1
 ./slot >> "$LOG" 2>&1
+[ -z "${OLD_GOV:-}" ] || echo "$OLD_GOV" > "$GOV_NODE" 2>/dev/null
 sync
