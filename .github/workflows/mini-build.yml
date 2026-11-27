@@ -1,0 +1,76 @@
+name: mini-build
+
+# Builds the Miyoo Mini Plus package on every push to the slot-sage work branch
+# (and on demand), so a change can be tried on a console without cutting a
+# release. The result is a workflow artifact, not a release: download it from
+# the run's Summary page. The emulator cores in the pak's System/ are committed,
+# so only the `slot` binary is built here. Same steps as release.yml's
+# build-miyoomini job.
+
+on:
+  push:
+    branches: [sage]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  miyoomini:
+    name: miyoomini pak
+    runs-on: ubuntu-24.04-arm
+    container: rust:1-bullseye
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install zip and the armv7 linker
+        run: |
+          set -eu
+          sed -i '/bullseye-security/d' /etc/apt/sources.list || true
+          apt-get -o Acquire::Check-Valid-Until=false update
+          apt-get install -y --no-install-recommends zip file gcc-arm-linux-gnueabihf libc6-dev-armhf-cross
+
+      - name: Build the Mini Plus frontend (armv7)
+        env:
+          CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc
+        run: |
+          set -eu
+          rustup target add armv7-unknown-linux-gnueabihf
+          cargo build --release -p slot --no-default-features --features miyoomini --target armv7-unknown-linux-gnueabihf --target-dir target-miyoomini
+
+      - name: Assemble Slot.pak
+        run: |
+          set -eu
+          pak="flip/Tools/miyoomini/Slot.pak"
+          cp target-miyoomini/armv7-unknown-linux-gnueabihf/release/slot "$pak/slot"
+          chmod +x "$pak/slot" "$pak/launch.sh"
+          file "$pak/slot" | grep -q "ELF 32-bit"
+          file "$pak/slot" | grep -q ARM
+          # Say which commit this is, so a log can never be mistaken for another build.
+          echo "sage-$(echo "$GITHUB_SHA" | cut -c1-7)" > "$pak/slot.version"
+          sh tools/check-pak-licences.sh "$pak"
+
+      - name: Package
+        run: |
+          set -eu
+          stage="$(mktemp -d)"
+          mkdir -p "$stage/Tools/miyoomini" "$stage/App"
+          cp -R flip/Tools/miyoomini/Slot.pak "$stage/Tools/miyoomini/Slot.pak"
+          cp -R flip/App-miyoomini/Slot "$stage/App/Slot"
+          cp -R flip/autoboot/miyoo354 "$stage/miyoo354"
+          cp tools/install-slot.sh "$stage/install.sh"
+          chmod +x "$stage/install.sh"
+          ( cd "$stage" && zip -qry "$GITHUB_WORKSPACE/Slot-miyoomini.zip" App Tools miyoo354 install.sh )
+          unzip -l Slot-miyoomini.zip | grep -q "Tools/miyoomini/Slot.pak/slot"
+          unzip -l Slot-miyoomini.zip | grep -q "Tools/miyoomini/Slot.pak/launch.sh"
+          # The binary on its own too: updating a card that already has Slot
+          # only needs this one file.
+          cp flip/Tools/miyoomini/Slot.pak/slot slot
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Slot-miyoomini-${{ github.sha }}
+          path: |
+            Slot-miyoomini.zip
+            slot
+          if-no-files-found: error

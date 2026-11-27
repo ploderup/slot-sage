@@ -248,6 +248,13 @@ pub fn apply_core_options(
     ) {
         core.set_option(&format!("{}_frameskip", which.as_str()), "auto");
     }
+    // The Mini Plus' CPU only holds snes9x2005 at about 90% speed (104-114
+    // frames in 2 s on a tester's console), so there it may skip drawing a
+    // frame when the sound runs low. The option is named for the core's own
+    // prefix, not the library's file name.
+    if cfg!(feature = "miyoomini") && which == Core::Snes9x {
+        core.set_option("snes9x_2005_frameskip", "auto");
+    }
     if which == Core::Mgba {
         core.set_option("mgba_sgb_borders", "OFF");
         core.set_option("mgba_force_gbp", "ON");

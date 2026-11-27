@@ -18,7 +18,17 @@ log() { echo "slot-boot: $*" >> "$LOG"; }
 since_boot() { cut -d. -f1 /proc/uptime; }
 
 stock_menu() {
-    exec "$DIR/MainUI.stock"
+    # A card set up by hand, or freshly formatted, has no MainUI.stock to fall
+    # back to. Then try the launcher the firmware keeps on internal storage
+    # (/customer/app, which is on its PATH) rather than exec a missing file.
+    for menu in "$DIR/MainUI.stock" /customer/app/MainUI; do
+        if [ -x "$menu" ]; then
+            log "starting $menu"
+            exec "$menu"
+        fi
+    done
+    log "no stock launcher found (no MainUI.stock, no /customer/app/MainUI)"
+    exit 1
 }
 
 log "miyoo354/app/MainUI at $(since_boot)s"
