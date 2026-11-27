@@ -61,6 +61,12 @@ jobs:
           [ "$(printf '%s\n2.28\n' "$need" | sort -V | tail -1)" = "2.28" ]
           # Say which commit this is, so a log can never be mistaken for another build.
           echo "sage-$(echo "$GITHUB_SHA" | cut -c1-7)" > "$pak/slot.version"
+          # Onion's CPU clock tool (tools/cpuclock, GPL-3.0), linked statically
+          # so it never depends on the console's C library. Its source ships
+          # beside it for the GPL.
+          arm-linux-gnueabihf-gcc -O2 -Wall -static -o "$pak/cpuclock" tools/cpuclock/cpuclock.c
+          file "$pak/cpuclock" | grep -q "ELF 32-bit.*ARM"
+          cp tools/cpuclock/cpuclock.c "$pak/System/licenses/cpuclock.c"
           sh tools/check-pak-licences.sh "$pak"
 
       - name: Package
@@ -79,6 +85,7 @@ jobs:
           # The binary on its own too: updating a card that already has Slot
           # only needs this one file.
           cp flip/Tools/miyoomini/Slot.pak/slot slot
+          cp flip/Tools/miyoomini/Slot.pak/cpuclock cpuclock
 
       - uses: actions/upload-artifact@v7
         with:
@@ -86,4 +93,6 @@ jobs:
           path: |
             Slot-miyoomini.zip
             slot
+            cpuclock
+            flip/Tools/miyoomini/Slot.pak/launch.sh
           if-no-files-found: error

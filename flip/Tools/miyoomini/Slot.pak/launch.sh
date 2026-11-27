@@ -136,17 +136,31 @@ if [ -n "$OVERCLOCK" ]; then
 	"$OVERCLOCK" "$KHZ" >> "$LOG" 2>&1
 else
 	# No MinUI helper (the stock firmware, or a card with only Slot on it). The
-	# firmware leaves the CPU on "ondemand", which sat at 600 to 800 MHz under
-	# Slot on a tester's console and made games sluggish. The kernel's own
-	# "performance" governor holds the top stock speed (1200 MHz) with no
-	# register writes; the old governor is put back when Slot exits.
+	# firmware leaves the CPU on "ondemand" at up to its stock 1200 MHz, and at
+	# that speed gpSP and snes9x2005 sat just under full speed on a tester's
+	# console (GBA about 96%, SNES about 90%). The pak's own cpuclock (Onion's
+	# PLL tool, tools/cpuclock) runs the CPU faster, as Onion and MinUI do on
+	# this console. Config/cpu-mhz picks the speed (1000-1900); the default,
+	# 1600, is well inside what Mini Plus owners run under Onion (1800 is a
+	# common setting). If the tool cannot run, fall back to the kernel's
+	# "performance" governor, which holds the stock 1200 MHz. Both are undone
+	# when Slot exits.
 	GOV_NODE=/sys/devices/system/cpu/cpufreq/policy0/scaling_governor
 	OLD_GOV="$(cat "$GOV_NODE" 2>/dev/null)"
-	if echo performance > "$GOV_NODE" 2>/dev/null; then
-		printf 'slot: cpu: no overclock.elf, governor %s -> performance\n' "${OLD_GOV:-unknown}" >> "$LOG"
+	MHZ=""
+	[ ! -f "$SLOT_ROOT/Config/cpu-mhz" ] || MHZ="$(tr -cd '0-9' < "$SLOT_ROOT/Config/cpu-mhz")"
+	if [ -z "$MHZ" ] || [ "$MHZ" -lt 1000 ] || [ "$MHZ" -gt 1900 ]; then
+		MHZ=1600
+	fi
+	CLOCKED=""
+	if [ -x ./cpuclock ] && NOW="$(./cpuclock "$MHZ" 2>>"$LOG")"; then
+		CLOCKED=1
+		printf 'slot: cpu: cpuclock %s MHz, now %s MHz (governor was %s)\n' "$MHZ" "$NOW" "${OLD_GOV:-unknown}" >> "$LOG"
+	elif echo performance > "$GOV_NODE" 2>/dev/null; then
+		printf 'slot: cpu: no overclock tool, governor %s -> performance\n' "${OLD_GOV:-unknown}" >> "$LOG"
 	else
 		OLD_GOV=""
-		printf 'slot: cpu: no overclock.elf and the governor could not be set, the clock is left as it was\n' >> "$LOG"
+		printf 'slot: cpu: no overclock tool and the governor could not be set, the clock is left as it was\n' >> "$LOG"
 	fi
 fi
 printf 'slot: launcher: cpu now %s kHz\n' "$(cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq 2>/dev/null || echo unreadable)" >> "$LOG"
@@ -164,5 +178,6 @@ export MALLOC_TRIM_THRESHOLD_=65536
 
 ./slot --init-root "$SLOT_ROOT" >> "$LOG" 2>&1
 ./slot >> "$LOG" 2>&1
+[ -z "${CLOCKED:-}" ] || ./cpuclock 1200 >/dev/null 2>&1
 [ -z "${OLD_GOV:-}" ] || echo "$OLD_GOV" > "$GOV_NODE" 2>/dev/null
 sync
