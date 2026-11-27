@@ -1,4 +1,13 @@
-const MAX_CORRECTION: f64 = 0.005;
+// How far the resampler may stretch or squeeze the sound to keep the ring near
+// its target. On the Mini Plus the ring sat at 900-1,900 of its 3,200-frame
+// target with 0.5% (a tester's log), so the device drains faster than the
+// nominal rate by more than that; 2% lets it settle nearer the target. It is
+// only reached when the ring is far off, so the pitch change stays small.
+const MAX_CORRECTION: f64 = if cfg!(feature = "miyoomini") {
+    0.02
+} else {
+    0.005
+};
 
 pub fn drc_ratio(queued_frames: usize, target_frames: usize) -> f64 {
     if target_frames == 0 {

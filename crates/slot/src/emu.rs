@@ -828,13 +828,17 @@ impl Worker {
                     // The Mini Plus runs gpSP and snes9x2005 right at the CPU's
                     // limit (fast-forward barely beat normal speed on a tester's
                     // console), so a frame that runs long drains the sound ring
-                    // and the next one is heard as a gap. Tell the core the
-                    // ring is running low, so a core with frameskip on "auto"
-                    // skips drawing that frame and catches up. Elsewhere only
-                    // the frames fast-forward throws away are skipped.
+                    // and the next one is heard as a gap. When the ring is nearly
+                    // empty, tell the core so a core with frameskip on "auto"
+                    // skips drawing that frame and catches up. Only when nearly
+                    // empty (a sixth of the target, about 11 ms at 48 kHz): at
+                    // half the target the ring sat below it half the time and
+                    // GBA skipped frames it did not need to, which a tester saw
+                    // as stutter. Elsewhere only the frames fast-forward throws
+                    // away are skipped.
                     let low = cfg!(feature = "miyoomini")
                         && speed == Speed::Normal
-                        && ring.queued_frames() < drc_target(ring.capacity_frames()) / 2;
+                        && ring.queued_frames() < drc_target(ring.capacity_frames()) / 6;
                     core.set_frame_skip(!last || low);
                     let frame_began = Instant::now();
                     match cable.as_mut() {
