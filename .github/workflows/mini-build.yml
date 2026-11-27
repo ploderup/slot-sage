@@ -18,17 +18,24 @@ permissions:
 jobs:
   miyoomini:
     name: miyoomini pak
-    runs-on: ubuntu-24.04-arm
-    container: rust:1-bullseye
+    # The Mini Plus firmware's C library is glibc 2.28, so build in Debian
+    # buster (glibc 2.28), as upstream's experimental.yml does. A bullseye
+    # build needed GLIBC_2.29/2.30 and would not start on a tester's console.
+    runs-on: ubuntu-latest
+    container: rust:1-buster
     steps:
       - uses: actions/checkout@v7
 
       - name: Install zip and the armv7 linker
         run: |
           set -eu
-          sed -i '/bullseye-security/d' /etc/apt/sources.list || true
+          # Buster is archived; point every line at archive.debian.org.
+          sed -i -e 's|deb.debian.org/debian buster|archive.debian.org/debian buster|g' \
+            -e 's|deb.debian.org/debian-security|archive.debian.org/debian-security|g' \
+            -e 's|security.debian.org/debian-security|archive.debian.org/debian-security|g' \
+            /etc/apt/sources.list
           apt-get -o Acquire::Check-Valid-Until=false update
-          apt-get install -y --no-install-recommends zip file gcc-arm-linux-gnueabihf libc6-dev-armhf-cross
+          apt-get install -y --no-install-recommends zip file binutils gcc-arm-linux-gnueabihf libc6-dev-armhf-cross
 
       - name: Build the Mini Plus frontend (armv7)
         env:
@@ -46,6 +53,12 @@ jobs:
           chmod +x "$pak/slot" "$pak/launch.sh"
           file "$pak/slot" | grep -q "ELF 32-bit"
           file "$pak/slot" | grep -q ARM
+          # Reject a binary that needs a newer glibc than the console has.
+          need="$(readelf --version-info "$pak/slot" |
+            sed -n 's/.*GLIBC_\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | sort -Vu | tail -1)"
+          printf 'slot requires glibc %s (the Mini Plus has 2.28)\n' "$need"
+          test -n "$need"
+          [ "$(printf '%s\n2.28\n' "$need" | sort -V | tail -1)" = "2.28" ]
           # Say which commit this is, so a log can never be mistaken for another build.
           echo "sage-$(echo "$GITHUB_SHA" | cut -c1-7)" > "$pak/slot.version"
           sh tools/check-pak-licences.sh "$pak"
